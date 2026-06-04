@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+unit="claude-desktop-prio-$(date +%s)-$$"
+tuned_launcher="${CLAUDE_DESKTOP_TUNED_LAUNCHER:-$HOME/.local/lib/claude-desktop-tuned/launcher}"
+
+if [[ ! -x "$tuned_launcher" ]]; then
+	echo "Claude tuned launcher not found or not executable: $tuned_launcher" >&2
+	exit 1
+fi
+
+exec systemd-run \
+	--user \
+	--collect \
+	--quiet \
+	--same-dir \
+	--unit="$unit" \
+	--description="Claude Desktop" \
+	--property=Slice=app.slice \
+	--property=ManagedOOMPreference=avoid \
+	--property=MemoryAccounting=yes \
+	--property=MemoryLow=2G \
+	--property=MemoryMin=1G \
+	--property=CPUWeight=1000 \
+	--property=IOWeight=1000 \
+	--property=Nice=-5 \
+	--property=OOMScoreAdjust=-700 \
+	"$tuned_launcher" \
+	"$@"

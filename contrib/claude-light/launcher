@@ -1,0 +1,194 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+source "/usr/lib/claude-desktop/launcher-common.sh"
+
+electron_exec="/usr/lib/claude-desktop/node_modules/electron/dist/electron"
+system_app_path="/usr/lib/claude-desktop/node_modules/electron/dist/resources/app.asar"
+user_app_path="${CLAUDE_TUNED_APP_ASAR:-$HOME/.local/share/claude-desktop-tuned/resources/app.asar}"
+app_path="$system_app_path"
+app_dir="/usr/lib/claude-desktop"
+
+if [[ "${1:-}" == "--doctor" ]]; then
+	run_doctor "$electron_exec"
+	exit $?
+fi
+
+setup_logging || exit 1
+setup_electron_env
+cleanup_orphaned_cowork_daemon
+cleanup_stale_lock
+cleanup_stale_cowork_socket
+
+claude_tuned_live_ui_exists() {
+	local pid cmdline state
+
+	for pid in $(pgrep -f 'app\.asar' 2>/dev/null); do
+		[[ $pid == "$$" || $pid == "$PPID" ]] && continue
+		cmdline=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null) || continue
+		[[ $cmdline == *cowork-vm-service* ]] && continue
+		[[ $cmdline == *--type=* ]] && continue
+		state=$(awk '/^State:/ {print $2; exit}' \
+			"/proc/$pid/status" 2>/dev/null) || continue
+		[[ $state == T || $state == t || $state == Z ]] && continue
+		return 0
+	done
+
+	return 1
+}
+
+cleanup_orphaned_claude_helpers() {
+	local patterns
+	local pids pattern pid state unique seen existing
+
+	claude_tuned_live_ui_exists && return 0
+
+	patterns=(
+		'/usr/lib/claude-desktop/node_modules/electron/dist/electron --type='
+		'/usr/lib/claude-desktop/node_modules/electron/dist/electron .*cowork-vm-service\.js'
+		'/home/.*/\.config/Claude/claude-code/.*/claude '
+	)
+	pids=''
+
+	for pattern in "${patterns[@]}"; do
+		for pid in $(pgrep -f "$pattern" 2>/dev/null || true); do
+			[[ $pid == "$$" || $pid == "$PPID" ]] && continue
+			state=$(awk '/^State:/ {print $2; exit}' \
+				"/proc/$pid/status" 2>/dev/null || true)
+			[[ $state == Z ]] && continue
+			pids="$pids $pid"
+		done
+	done
+
+	[[ -n ${pids// /} ]] || return 0
+
+	unique=''
+	for pid in $pids; do
+		seen=0
+		for existing in $unique; do
+			[[ $existing == "$pid" ]] && seen=1 && break
+		done
+		[[ $seen -eq 0 ]] && unique="$unique $pid"
+	done
+
+	for pid in $unique; do
+		kill "$pid" 2>/dev/null || true
+	done
+
+	sleep 0.2
+
+	for pid in $unique; do
+		if kill -0 "$pid" 2>/dev/null; then
+			kill -KILL "$pid" 2>/dev/null || true
+		fi
+	done
+
+	log_message "Killed orphaned Claude helper processes (PIDs:$unique)"
+}
+
+cleanup_orphaned_claude_helpers
+
+log_message "--- Claude Desktop Tuned Launcher Start ---"
+log_message "Timestamp: $(date)"
+log_message "Arguments: $*"
+log_session_env
+
+if ! check_display; then
+	log_message "No display detected (TTY session)"
+	echo "Error: Claude Desktop requires a graphical desktop environment." >&2
+	exit 1
+fi
+
+if [[ ! -x "$electron_exec" ]]; then
+	log_message "Error: Electron executable not found at $electron_exec"
+	echo "Error: Claude Desktop Electron executable not found at $electron_exec" >&2
+	exit 1
+fi
+
+if [[ "${CLAUDE_TUNED_USE_SYSTEM_ASAR:-0}" != "1" ]] && [[ -f "$user_app_path" ]]; then
+	app_path="$user_app_path"
+	log_message "Using tuned app.asar: $app_path"
+else
+	log_message "Using system app.asar: $app_path"
+fi
+
+detect_display_backend
+if [[ $is_wayland == true ]]; then
+	log_message "Wayland detected"
+fi
+
+build_electron_args "deb"
+
+claude_tuned_falsey() {
+	case "${1:-}" in
+		0|false|FALSE|no|NO|off|OFF) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
+add_arg_if_absent() {
+	local wanted="$1"
+	local arg
+
+	for arg in "${electron_args[@]}"; do
+		[[ "$arg" == "$wanted" ]] && return 0
+	done
+
+	electron_args+=("$wanted")
+}
+
+has_arg_prefix() {
+	local prefix="$1"
+	local arg
+
+	for arg in "${electron_args[@]}"; do
+		[[ "$arg" == "$prefix"* ]] && return 0
+	done
+
+	return 1
+}
+
+if ! claude_tuned_falsey "${CLAUDE_TUNED_REDUCED_MOTION:-1}"; then
+	add_arg_if_absent "--force-prefers-reduced-motion"
+	log_message "Tuning: reduced motion flag enabled"
+fi
+
+if ! claude_tuned_falsey "${CLAUDE_TUNED_DISABLE_GPU_COMPOSITING:-1}"; then
+	add_arg_if_absent "--disable-gpu-compositing"
+	log_message "Tuning: GPU compositing disabled"
+fi
+
+if ! claude_tuned_falsey "${CLAUDE_TUNED_PRECISE_MEMORY_INFO:-1}"; then
+	add_arg_if_absent "--enable-precise-memory-info"
+	log_message "Tuning: precise memory info enabled"
+fi
+
+if ! claude_tuned_falsey "${CLAUDE_TUNED_EXPOSE_GC:-1}" &&
+	! has_arg_prefix "--js-flags"
+then
+	add_arg_if_absent "--js-flags=--expose-gc"
+	log_message "Tuning: V8 GC exposed"
+fi
+
+electron_args+=("$app_path")
+
+if [[ "${CLAUDE_DESKTOP_TUNED_PRINT_ARGS:-0}" == "1" ]]; then
+	printf 'electron=%q\n' "$electron_exec"
+	printf 'cwd=%q\n' "$app_dir"
+	printf 'args='
+	printf '<%s>' "${electron_args[@]}"
+	printf '\napp_args='
+	printf '<%s>' "$@"
+	printf '\n'
+	exit 0
+fi
+
+log_message "Changing directory to $app_dir"
+cd "$app_dir" || {
+	log_message "Failed to cd to $app_dir"
+	exit 1
+}
+
+log_message \
+	"Executing tuned Claude: $electron_exec ${electron_args[*]} $*"
+exec "$electron_exec" "${electron_args[@]}" "$@" >> "$log_file" 2>&1

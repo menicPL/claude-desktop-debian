@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+source_asar="${CLAUDE_TUNED_SOURCE_ASAR:-/usr/lib/claude-desktop/node_modules/electron/dist/resources/app.asar}"
+source_unpacked="${CLAUDE_TUNED_SOURCE_UNPACKED:-/usr/lib/claude-desktop/node_modules/electron/dist/resources/app.asar.unpacked}"
+target_root="${CLAUDE_TUNED_TARGET_ROOT:-$HOME/.local/share/claude-desktop-tuned/resources}"
+target_asar="$target_root/app.asar"
+work_dir="$(mktemp -d)"
+
+cleanup() {
+	rm -rf "$work_dir"
+}
+
+find_asar_cmd() {
+	if command -v asar >/dev/null 2>&1; then
+		ASAR_CMD=(asar)
+		return 0
+	fi
+
+	if command -v npx >/dev/null 2>&1; then
+		ASAR_CMD=(npx --yes asar)
+		return 0
+	fi
+
+	echo "asar CLI not found; install 'asar' or ensure npx is available" >&2
+	exit 1
+}
+
+trap cleanup EXIT
+
+mkdir -p "$target_root"
+find_asar_cmd
+"${ASAR_CMD[@]}" extract "$source_asar" "$work_dir/app"
+
+node - "$work_dir/app/.vite/build/index.js" <<'NODE'
+const fs = require("node:fs");
+
+const file = process.argv[2];
+const source = fs.readFileSync(file, "utf8");
+const marker = "claudeLinuxMemoryGuardInstalled";
+
+if (source.includes(marker)) {
+	process.exit(0);
+}
+
+const needle = "aA.app.whenReady().then(()=>{gKr()})";
+if (!source.includes(needle)) {
+	throw new Error(`Claude memory guard anchor not found: ${needle}`);
+}
+
+const guard = `(function claudeLinuxStartMemoryGuard(){
+try{
+if(process.platform!=="linux"||globalThis.${marker})return;
+globalThis.${marker}=true;
+var __electron=aA,__tag="[claude-linux-memory-guard]",__env=process.env||{};
+function __false(value){return /^(0|false|no|off)$/i.test(String(value||""))}
+if(__false(__env.CLAUDE_TUNED_MEMORY_GUARD)){console.info(__tag+" disabled");return}
+function __int(name,fallback,min,max){var raw=__env[name],n=Number.parseInt(raw==null?"":raw,10);if(!Number.isFinite(n)||n<min)return fallback;return Math.min(n,max)}
+var __intervalMs=__int("CLAUDE_TUNED_MEMORY_GUARD_INTERVAL_SEC",300,30,3600)*1000;
+var __rendererGcMb=__int("CLAUDE_TUNED_RENDERER_GC_MB",900,128,8192);
+var __totalGcMb=__int("CLAUDE_TUNED_TOTAL_GC_MB",1800,256,32768);
+var __logEvery=__int("CLAUDE_TUNED_MEMORY_LOG_EVERY",3,1,1000);
+var __gcEnabled=!__false(__env.CLAUDE_TUNED_MEMORY_GC);
+var __tick=0,__gcInFlight=false;
+function __mb(value){return Math.round((Number(value)||0)/1024)}
+function __metrics(){try{return __electron.app.getAppMetrics?.()||[]}catch(__error){return[]}}
+function __summary(){var metrics=__metrics(),summary={processCount:metrics.length,totalWorkingSetMb:0,totalPrivateMb:0,maxRendererMb:0,maxRendererPid:null,types:{}};for(var i=0;i<metrics.length;i+=1){var metric=metrics[i]||{},type=String(metric.type||"unknown"),memory=metric.memory||{},workingSetMb=__mb(memory.workingSetSize),privateMb=__mb(memory.privateBytes),bucket=summary.types[type];summary.totalWorkingSetMb+=workingSetMb;summary.totalPrivateMb+=privateMb;if(bucket==null)bucket=summary.types[type]={count:0,workingSetMb:0,privateMb:0,maxWorkingSetMb:0,maxPid:null};bucket.count+=1;bucket.workingSetMb+=workingSetMb;bucket.privateMb+=privateMb;if(workingSetMb>bucket.maxWorkingSetMb){bucket.maxWorkingSetMb=workingSetMb;bucket.maxPid=metric.pid??null}if(/^(Renderer|Tab)$/i.test(type)&&workingSetMb>summary.maxRendererMb){summary.maxRendererMb=workingSetMb;summary.maxRendererPid=metric.pid??null}}return summary}
+function __types(summary){return Object.keys(summary.types).sort().map(function(type){var bucket=summary.types[type];return type+":count="+bucket.count+",ws="+bucket.workingSetMb+",max="+bucket.maxWorkingSetMb}).join(";")}
+function __log(event,reason,summary){console.info(__tag+" event="+event+" reason="+reason+" total_ws_mb="+summary.totalWorkingSetMb+" total_private_mb="+summary.totalPrivateMb+" renderer_max_ws_mb="+summary.maxRendererMb+" renderer_pid="+(summary.maxRendererPid??"none")+" process_count="+summary.processCount+" types="+__types(summary))}
+function __mainGc(){if(typeof globalThis.gc==="function")return true;try{require("node:v8").setFlagsFromString("--expose_gc");globalThis.gc=require("node:vm").runInNewContext("gc")}catch(__error){}return typeof globalThis.gc==="function"}
+function __rendererGc(){var windows=[];try{windows=__electron.BrowserWindow?.getAllWindows?.()||[]}catch(__error){}var promises=[];for(var i=0;i<windows.length;i+=1){var webContents=windows[i]?.webContents;if(webContents==null||webContents.isDestroyed?.())continue;try{promises.push(Promise.resolve(webContents.executeJavaScript("globalThis.gc?.()",true)).catch(function(){}))}catch(__error){}}return Promise.all(promises).then(function(){return promises.length})}
+function __forceGc(reason){if(__gcInFlight)return;__gcInFlight=true;var mainGc=false;try{if(__mainGc()){globalThis.gc();mainGc=true}}catch(__error){}__rendererGc().then(function(rendererRequests){console.info(__tag+" event=gc reason="+reason+" main_gc="+(mainGc?1:0)+" renderer_requests="+rendererRequests);var timer=setTimeout(function(){__sample("post-gc")},5000);timer.unref?.()}).catch(function(__error){console.warn(__tag+" gc_failed "+(__error?.message||__error))}).finally(function(){__gcInFlight=false})}
+function __sample(reason){var summary=__summary();__tick+=1;var overRenderer=summary.maxRendererMb>=__rendererGcMb,overTotal=summary.totalWorkingSetMb>=__totalGcMb,overLimit=overRenderer||overTotal;if(overLimit||__tick===1||__tick%__logEvery===0)__log(overLimit?"threshold":"sample",reason,summary);if(overLimit&&__gcEnabled)__forceGc(reason);else if(overLimit&&!__gcEnabled)console.warn(__tag+" threshold reached but GC disabled")}
+globalThis.claudeLinuxMemoryGuardSample=function(){__sample("manual")};
+console.info(__tag+" enabled interval_sec="+Math.round(__intervalMs/1000)+" renderer_gc_mb="+__rendererGcMb+" total_gc_mb="+__totalGcMb+" gc="+(__gcEnabled?1:0));
+var startupTimer=setTimeout(function(){__sample("startup")},10000);startupTimer.unref?.();
+var intervalTimer=setInterval(function(){__sample("interval")},__intervalMs);intervalTimer.unref?.()
+}catch(__error){try{console.warn("[claude-linux-memory-guard] failed "+(__error?.message||__error))}catch{}}
+})()`;
+
+const patched = source.replace(
+	needle,
+	`aA.app.whenReady().then(()=>{${guard};gKr()})`,
+);
+fs.writeFileSync(file, patched);
+NODE
+
+tmp_asar="$work_dir/app.asar"
+"${ASAR_CMD[@]}" pack "$work_dir/app" "$tmp_asar"
+mv "$tmp_asar" "$target_asar"
+ln -sfn "$source_unpacked" "$target_root/app.asar.unpacked"
+
+printf 'wrote %s\n' "$target_asar"
+grep -a -o 'claudeLinuxMemoryGuardInstalled' "$target_asar" \
+	| head -1 >/dev/null

@@ -18,6 +18,27 @@ Model Context Protocol settings are stored in:
 | `CLAUDE_TITLEBAR_STYLE` | unset (`hybrid`) | Controls window decoration style: `hybrid` (system frame + in-app topbar), `native` (system frame, no in-app topbar), `hidden` (frameless WCO — broken on X11, kept for diagnostics). See [Titlebar Style](#titlebar-style) below. |
 | `COWORK_VM_BACKEND` | unset (auto-detect) | Force a specific Cowork isolation backend: `kvm` (full VM), `bwrap` (bubblewrap namespace sandbox), or `host` (no isolation). See [Cowork Backend](#cowork-backend) below. |
 
+## Claude-light Overlay
+
+The optional [`claude-light`](claude-light.md) overlay adds a user-local tuned
+launcher and rebuilt `app.asar` for long sessions. Its knobs are separate from
+the packaged app's default environment and only apply when you launch through
+the overlay scripts in `contrib/claude-light/`.
+
+Common knobs:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CLAUDE_TUNED_USE_SYSTEM_ASAR` | `0` | Launch the packaged `app.asar` instead of the rebuilt user-local one. |
+| `CLAUDE_TUNED_REDUCED_MOTION` | `1` | Add `--force-prefers-reduced-motion`. |
+| `CLAUDE_TUNED_DISABLE_GPU_COMPOSITING` | `1` | Add `--disable-gpu-compositing`. |
+| `CLAUDE_TUNED_PRECISE_MEMORY_INFO` | `1` | Add `--enable-precise-memory-info`. |
+| `CLAUDE_TUNED_EXPOSE_GC` | `1` | Add `--js-flags=--expose-gc` unless already provided. |
+| `CLAUDE_TUNED_MEMORY_GUARD` | `1` | Enable the injected Linux memory guard. |
+| `CLAUDE_TUNED_MEMORY_GUARD_INTERVAL_SEC` | `300` | Memory sampling interval. |
+| `CLAUDE_TUNED_RENDERER_GC_MB` | `900` | Renderer working-set GC threshold. |
+| `CLAUDE_TUNED_TOTAL_GC_MB` | `1800` | Total Electron working-set GC threshold. |
+
 ### Wayland Support
 
 By default, Claude Desktop uses X11 mode (via XWayland) on Wayland sessions to ensure global hotkeys work. If you prefer native Wayland and don't need global hotkeys:

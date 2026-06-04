@@ -59,6 +59,16 @@ Runtime logs are available at:
 ~/.cache/claude-desktop-debian/launcher.log
 ```
 
+If you are launching through the optional [`claude-light`](claude-light.md)
+overlay, the same log file also contains:
+
+- `Using tuned app.asar: ...`
+- `Tuning: reduced motion flag enabled`
+- `Tuning: GPU compositing disabled`
+- `Tuning: precise memory info enabled`
+- `Tuning: V8 GC exposed`
+- `[claude-linux-memory-guard] ...`
+
 ## Common Issues
 
 ### Window Scaling Issues

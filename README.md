@@ -6,6 +6,8 @@ This project provides build scripts to run Claude Desktop natively on Linux syst
 
 **Documentation:** Full docs at [`docs/index.md`](docs/index.md). Release history in [`CHANGELOG.md`](CHANGELOG.md). Contributing: [`CONTRIBUTING.md`](CONTRIBUTING.md). Security reports: [`SECURITY.md`](SECURITY.md).
 
+**Experimental overlay:** [`docs/claude-light.md`](docs/claude-light.md) documents a user-local `claude-light` tuning layer for long sessions, memory guard experiments, and launcher-side performance tweaks without modifying `/usr/lib/claude-desktop`.
+
 ---
 
 > **⚠️ APT migration notice (April 2026)**
@@ -147,6 +149,8 @@ Model Context Protocol settings are stored in:
 ```
 
 For additional configuration options including environment variables and Wayland support, see [docs/configuration.md](docs/configuration.md).
+
+For an opt-in user-local tuning layer with memory guard and launcher tweaks, see [docs/claude-light.md](docs/claude-light.md).
 
 ## Troubleshooting
 

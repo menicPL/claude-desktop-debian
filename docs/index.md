@@ -13,6 +13,7 @@ claude-desktop --doctor
 - [**Building from source**](building.md) — `./build.sh`, format flags, the Electron mirror env vars
 - [**Configuration**](configuration.md) — MCP config file locations, env vars, where state lives
 - [**Troubleshooting**](troubleshooting.md) — symptom-keyed fixes, `--doctor` warning index
+- [**Claude-light**](claude-light.md) — user-local long-session tuning overlay for Claude Desktop
 
 ## Project direction
 
